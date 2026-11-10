@@ -1,4 +1,4 @@
-# Vai no repo central de workflows: .github/workflows/java-springboot.yml
+
 name: Java Spring Boot (reusable) - ECR
 
 on:
@@ -45,14 +45,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # OIDC com a AWS
+      id-token: write   
     env:
       REPO: ${{ inputs.ecr-repository != '' && inputs.ecr-repository || github.event.repository.name }}
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
 
-      # Só autentica quando vai publicar (em PR apenas valida o build)
       - uses: aws-actions/configure-aws-credentials@v5
         if: github.event_name != 'pull_request'
         with:
@@ -65,7 +64,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ inputs.ecr-registry }}/${{ env.REPO }}
-          # sem tag de branch: compatível com tag immutability do ECR
           tags: |
             type=sha
             type=semver,pattern={{version}}
