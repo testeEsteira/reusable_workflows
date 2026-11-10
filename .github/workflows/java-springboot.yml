@@ -1,0 +1,83 @@
+# Vai no repo central de workflows: .github/workflows/java-springboot.yml
+name: Java Spring Boot (reusable) - ECR
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        type: string
+        default: "21"
+      ecr-registry:
+        description: "ex.: 123456789012.dkr.ecr.us-east-1.amazonaws.com"
+        type: string
+        required: true
+      aws-region:
+        type: string
+        required: true
+      ecr-repository:
+        description: "Nome do repo no ECR. Vazio = nome do repo GitHub."
+        type: string
+        default: ""
+      platforms:
+        type: string
+        default: linux/amd64,linux/arm64
+    secrets:
+      AWS_ROLE_ARN:
+        description: "Role IAM assumida via OIDC, com permissão de push no ECR"
+        required: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: maven
+      - run: mvn -B verify
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # OIDC com a AWS
+    env:
+      REPO: ${{ inputs.ecr-repository != '' && inputs.ecr-repository || github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+
+      # Só autentica quando vai publicar (em PR apenas valida o build)
+      - uses: aws-actions/configure-aws-credentials@v5
+        if: github.event_name != 'pull_request'
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: github.event_name != 'pull_request'
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ inputs.ecr-registry }}/${{ env.REPO }}
+          # sem tag de branch: compatível com tag immutability do ECR
+          tags: |
+            type=sha
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ inputs.platforms }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_NAME=${{ github.event.repository.name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
